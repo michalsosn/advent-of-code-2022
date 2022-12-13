@@ -1,10 +1,8 @@
 import fileinput
-import functools as ft
 import json
 
 
 def compare_numbers(left, right):
-    print(f'numbers {left} {right}')
     if left < right:
         return -1
     elif left > right:
@@ -14,7 +12,6 @@ def compare_numbers(left, right):
 
 
 def compare_lists(left, right):
-    print(f'lists {left} {right}')
     for l, r in zip(left, right):
         result = compare_packets(l, r)
         if result != 0:
@@ -47,7 +44,6 @@ def load_packet_pairs():
         elif i % 3 == 1:
             right = json.loads(line)
             if compare_packets(left, right) == -1:
-                print(f'OK {pair_i}')
                 equal_sum += pair_i
         else:
             pair_i += 1
@@ -71,17 +67,20 @@ def load_packets():
 if __name__ == '__main__':
     # equal_sum = load_packet_pairs()
     # print(equal_sum)
+
     packets = load_packets()
 
-    divisors = [[[2]], [[6]]]
-    packets.extend(divisors)
+    divisors = [[[6]], [[2]]]
+    less_than_divisor_counts = [1, 0]
 
-    packets.sort(key=ft.cmp_to_key(compare_packets))
-
-    for i, packet in enumerate(packets):
-        print(i, packet)
+    for packet in packets:
+        for i, divisor in enumerate(divisors):
+            if compare_packets(divisor, packet) == -1:
+                break
+            less_than_divisor_counts[i] += 1
 
     result = 1
-    for divisor in divisors:
-        result *= packets.index(divisor) + 1
+    for count in less_than_divisor_counts:
+        result *= count + 1
     print(result)
+
