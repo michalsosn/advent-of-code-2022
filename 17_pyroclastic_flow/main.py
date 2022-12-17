@@ -152,11 +152,21 @@ class Board:
                     count += 1
         return count
 
+    def signature(self, last_rows):
+        result = 0
+        for row in self.fields[:-last_rows-1:-1]:
+            for cell in row:
+                result = 2 * result + cell
+        return result
 
-def simulate(board, shapes, moves, block_num):
+
+def simulate(board, shapes, moves, block_num, signature_size):
+    block_i = 0
     move_i = 0
 
-    for block_i in range(block_num):
+    signatures_seen = {}
+
+    while block_i < block_num:
         shape = shapes[block_i % len(shapes)]
         block = Block(x=2, y=board.height + 3, shape=shape)
 
@@ -174,15 +184,40 @@ def simulate(board, shapes, moves, block_num):
             if not board.check_collides(shadow):
                 block = shadow
             else:
-                if block_i == 21:
-                    print(Field.show(board.fields[::-1]))
                 board.add(block)
                 break
 
-        #print(f'After {block_i} {move_i}')
-        #print(Field.show(board.fields[::-1]))
-        #print()
-            
+        if signature_size and board.height >= signature_size:
+            signature = (
+                block_i % len(shapes), 
+                move_i % len(moves), 
+                board.signature(signature_size)
+            )
+            if signature in signatures_seen:
+                last_seen_i, last_seen_height = signatures_seen[signature]
+                cycle_height = board.height - last_seen_height
+                if cycle_height <= signature_size:
+                    cycle_i = block_i - last_seen_i
+                    print(f"At block {block_i} seen the same signature "
+                          f"as at {last_seen_i} (cycle of {cycle_i} steps).")
+                    skip_cycles = (block_num - block_i) // cycle_i
+                    skip_blocks = skip_cycles * cycle_i
+                    skip_height = skip_cycles * cycle_height
+                    print(f"Skipping {skip_cycles} cycles of size {cycle_i} "
+                          f"(a total of {skip_blocks} blocks)")
+                    print(f"Height after {last_seen_i} blocks was {last_seen_height} "
+                          f"and after {block_i} it is {board.height}. The cycle adds "
+                          f"{cycle_height} height. So skipped {skip_cycles} add "
+                          f"{skip_height} height")
+                    block_i += skip_blocks
+                    print(f"Skipped to {block_i}")
+                    signature_size = 0
+            elif board.height > signature_size * 2:
+                print(f'Failed to find a cycle for the signature size {signature_size}')
+                return
+            signatures_seen[signature] = (block_i, board.height)
+
+        block_i += 1
 
 
 if __name__ == '__main__':
@@ -202,9 +237,9 @@ if __name__ == '__main__':
     print(' '.join([Move.to_symbol(move) for move in moves]))
     print()
 
-    simulate(board, shapes, moves, block_num=2022)
-    print('Board')
-    print(Field.show(board.fields[::-1]))
-    print()
+    simulate(board, shapes, moves, block_num=1000000000000, signature_size=3000)
+    #print('Board')
+    #print(Field.show(board.fields[::-1]))
+    #print()
     print('Result')
     print(board.height)
