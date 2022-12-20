@@ -40,60 +40,83 @@ def read_blueprints():
 
 
 def calculate_max_geodes(blueprint, time_limit):
+    np.seterr(divide='ignore', invalid='ignore')
+
     costs = blueprint.costs
 
     producers = np.zeros(Resource.SIZE)
     producers[Resource.ORE] = 1
+    total_resources = np.zeros(Resource.SIZE)
     resources = np.zeros(Resource.SIZE)
+    max_producers = costs.max(axis=0)
+    max_producers[-1] = np.inf
+    total_resources_cache = {}
+    best_geodes = [0]
 
     def visit(time):
-        if time == time_limit:
-            return resources[Resource.GEODE]
+        if time >= time_limit:
+            if best_geodes[0] < resources[Resource.GEODE]:
+                # print(f"{time:02d} {resources} {producers} fin")
+                best_geodes[0] = resources[Resource.GEODE]
+                #print(f"{best_geodes[0]}")
 
-        max_geodes = 0
+        time_left = time_limit - time
+
+        cache_key = (time,) + tuple(producers)
+        cache_val = tuple(resources)
+        retrieved_cache_val = total_resources_cache.get(cache_key)
+        if retrieved_cache_val is not None and retrieved_cache_val[0] <= cache_val[0] and retrieved_cache_val[1] <= cache_val[1] and retrieved_cache_val[2] <= cache_val[2] and retrieved_cache_val[3] <= cache_val[3]:
+            return
+        total_resources_cache[cache_key] = cache_val
+
+        possible_geodes = resources[Resource.GEODE] + time_left * (2 * producers[Resource.GEODE] + time_left - 1) // 2
+        if possible_geodes <= best_geodes[0]:
+            return
 
         for resource_type in range(Resource.SIZE - 1, -1, -1):
+            if producers[resource_type] >= max_producers[resource_type]:
+                continue
+            if resources[resource_type] + producers[resource_type] * time_left >= max_producers[resource_type] * time_left:
+                continue
+
             cost_row = costs[resource_type]
             resources_required = cost_row - resources
             time_required = max(
-                1,
-                np.ceil(np.nan_to_num(resources_required / producers).max())
-            )
+                0,
+                int(np.ceil(np.nan_to_num(resources_required / producers).max()))
+            ) + 1
 
             if time + time_required >= time_limit:
                 continue
-            #print(time, resource_type, time_required, resources_required, producers)
 
+            total_resources[:] += producers * time_required
             resources[:] += producers * time_required
             resources[:] -= cost_row
             producers[resource_type] += 1
-            max_geodes = max(max_geodes, visit(time + time_required))
+            visit(time + time_required)
             producers[resource_type] -= 1
             resources[:] += cost_row
             resources[:] -= producers * time_required
+            total_resources[:] -= producers * time_required
 
-            if resource_type == Resource.GEODE:
-                break
-
-        time_left = time_limit - time
         final_geodes = resources[Resource.GEODE] + producers[Resource.GEODE] * time_left
-        max_geodes = max(max_geodes, final_geodes)
-        #print(f'hmm {time} {time_left} {producers} {resources} {max_geodes}')
-
-        return max_geodes
+        if best_geodes[0] <= final_geodes:
+            best_geodes[0] = final_geodes
     
-    max_geodes = visit(0)
+    visit(0)
 
-    return max_geodes
+    return best_geodes[0]
 
 
 if __name__ == '__main__':
-    blueprints = read_blueprints()
+    blueprints = read_blueprints()[:3]
     print(blueprints)
 
     quality = 0
     for i, blueprint in enumerate(blueprints):
-        geodes = calculate_max_geodes(blueprint, time_limit=24)
+        geodes = calculate_max_geodes(blueprint, time_limit=32)
+        print(i, geodes)
         quality += (i + 1) * geodes
 
     print(quality)
+
