@@ -71,15 +71,12 @@ class Position:
     def __repr__(self):
         return f'Position(coords={self.coords}, direction={self.direction}, side={self.side})'
 
-    def side_ix(self):
-        return (np.flatnonzero(self.side)[0] + 1) * self.side.sum()
-
     def rotate(self, rotation, times=1):
         if times < 0:
             times = -times
             rotation = Rotation.LEFT if rotation == Rotation.RIGHT else Rotation.RIGHT
 
-        print(f'rotation {self} {rotation} {times} times')
+        #print(f'rotation {self} {rotation} {times} times')
         if (rotation == Rotation.RIGHT) == (self.side[0] == 1 or self.side[1] == -1 or self.side[2] == 1):
             # y side is inverted bc we should rotate axes in order [z, x], not [x, z]
             rotation_m = self.ROTATION_CW
@@ -88,20 +85,20 @@ class Position:
 
         for i in range(times):
             self.direction[self.side == 0] = self.direction[self.side == 0] @ rotation_m
-        print(f'rotated {self}')
+        #print(f'rotated {self}')
 
     def step(self, size, times=1):
-        print(f'move {self}')
+        #print(f'move {self}')
         for i in range(times):
             self.coords[:] += self.direction
             self.clip_cube(size)
-        print(f'moved {self}')
+        #print(f'moved {self}')
 
     def clip_cube(self, size):
         on_side = self.coords[self.side == 0]
         if (0 <= on_side).all() and (on_side < size).all():
             return
-        print(f'cut from {self}')
+        #print(f'cut from {self}')
         # np. p[4 0 -1] d[1 0 0] s[0 0 1] -> p[4 0 0] d[0 0 -1] s[-1 0 0]
         # np. p[-1 0 -1] d[-1 0 0] s[0 0 1] -> p[-1 0 0] d[0 0 -1] s[1 0 0]
         # np. p[0 4 -1] d[0 1 0] s[0 0 1] -> p[0 4 0] d[0 0 -1] s[0 -1 0]
@@ -109,7 +106,7 @@ class Position:
         self.direction = self.side
         self.side = (self.coords == size).astype(int) * -1 \
                   + (self.coords == -1).astype(int) 
-        print(f'cut to {self}')
+        #print(f'cut to {self}')
 
 
 @dataclass
@@ -126,92 +123,103 @@ class RegionMapping:
 class Texture:
     def __init__(self, fields, size):
         self.fields = fields
+        self.size = size
 
         height = len(fields)
         width = max(len(row) for row in fields)
-        grid_h = height // size
-        grid_w = width // size
-        print(size, height, width, grid_h, grid_w)
 
-        first_region = None
-        grid = [[0] * grid_w for y in range(grid_h)]
-        for yi in range(grid_h):
-            for xi in range(grid_w):
-                if xi * size >= len(fields[yi * size]):
-                    continue
-                cell = fields[yi * size][xi * size]
-                if cell != Field.VOID:
-                    grid[yi][xi] = 1
-                    if first_region is None:
-                        first_region = (yi, xi)
+        def find_first():
+            for y in range(height):
+                for x in range(width):
+                    if x >= len(fields[y]):
+                        continue
+                    cell = fields[y][x]
+                    if cell != Field.VOID:
+                        return (y, x)
+        first_yx = find_first()
 
         mappings = {}
+        visited = [[False] * width for y in range(height)]
         queue = collections.deque()
         dydx_to_r_rotations = {
             (0, 1): 0, (1, 0): 1, (0, -1): 2, (-1, 0): 3,
         }
 
-        def visit(yi, xi, p_yi, p_xi):
-            if grid[yi][xi] != 1:
+        def visit(y, x, p_y, p_x):
+            if x >= len(fields[y]):
+                return
+            if fields[y][x] == Field.VOID:
+                return
+            if visited[y][x]:
                 return
 
-            if p_yi is None:
+            if p_y is None:
                 position = Position.initial(0, 0)
                 mapping = RegionMapping(
-                    texture_x=xi * size, texture_y=yi * size, 
+                    texture_x=x, texture_y=y, 
                     cube_position=position,
-                    #y_to_coord_a=np.array([0, 1, 0]),
-                    #y_to_coord_b=np.array([0, 0, 0]),
-                    #x_to_coord_a=np.array([1, 0, 0]),
-                    #x_to_coord_b=np.array([0, 0, 0]),
                 )
             else:
-                p_mapping = mappings[(p_yi, p_xi)]
+                p_mapping = mappings[(p_y, p_x)]
 
-                dy, dx = yi - p_yi, xi - p_xi
+                dy, dx = y - p_y, x - p_x
                 r_rotations = dydx_to_r_rotations[(dy, dx)]
                 position = p_mapping.cube_position.copy()
                 position.rotate(Rotation.RIGHT, times=r_rotations)
-                position.step(times=size, size=size)
-                position.rotate(Rotation.RIGHT, times=-r_rotations)
+                position.step(times=1, size=size)
+                position.rotate(Rotation.LEFT, times=r_rotations)
 
                 mapping = RegionMapping(
-                    texture_x=xi * size, texture_y=yi * size, 
+                    texture_x=x, texture_y=y, 
                     cube_position=position,
                 )
 
-            mappings[(yi, xi)] = mapping
-            grid[yi][xi] = 2
-            queue.append((yi, xi))
+            mappings[(y, x)] = mapping
+            visited[y][x] = True
+            queue.append((y, x))
 
-        visit(first_region[0], first_region[1], p_yi=None, p_xi=None)
+        visit(first_yx[0], first_yx[1], p_y=None, p_x=None)
         while queue:
             y, x = queue.popleft()
             if y > 0: 
-                visit(y - 1, x, p_yi=y, p_xi=x)
-            if y < grid_h - 1: 
-                visit(y + 1, x, p_yi=y, p_xi=x)
+                visit(y - 1, x, p_y=y, p_x=x)
+            if y < height - 1: 
+                visit(y + 1, x, p_y=y, p_x=x)
             if x > 0: 
-                visit(y, x - 1, p_yi=y, p_xi=x)
-            if x < grid_w - 1: 
-                visit(y, x + 1, p_yi=y, p_xi=x)
+                visit(y, x - 1, p_y=y, p_x=x)
+            if x < width - 1: 
+                visit(y, x + 1, p_y=y, p_x=x)
 
-        side_ix_to_mapping = {}
+        cube_to_texture_mapping = {}
         for mapping in mappings.values():
-            side_ix = mapping.cube_position.side_ix()
-            side_ix_to_mapping[side_ix] = mapping
-        print(side_ix_to_mapping)
-        self.side_ix_to_mapping = side_ix_to_mapping
+            cube_point = tuple(mapping.cube_position.coords)
+            cube_to_texture_mapping[cube_point] = mapping
+        print(sorted(cube_to_texture_mapping.keys()))
+        print(len(cube_to_texture_mapping))
+        print(cube_to_texture_mapping[(0, 0, -1)])
+        self.cube_to_texture_mapping = cube_to_texture_mapping
 
-    def cube_to_grid_coords(self, x, y, z):
-        return 0, 0
+    def cube_to_texture_coords(self, x, y, z):
+        mapping = self.cube_to_texture_mapping[(x, y, z)]
+        return mapping.texture_y, mapping.texture_x
 
-    def cube_to_grid_direction(self, direction):
-        return 0
+    def cube_to_texture_direction(self, position):
+        mapping = self.cube_to_texture_mapping[tuple(position.coords)]
+
+        if (position.direction == mapping.cube_position.direction).all():
+            return 0
+
+        shadow = position.copy()
+        for i in range(3):
+            shadow.rotate(Rotation.LEFT, times=1)
+            if (shadow.direction == mapping.cube_position.direction).all():
+                return i + 1
+
+        raise ValueError('never matched direction')
 
     def get_field(self, x, y, z):
-        grid_y, grid_x = self.cube_to_grid_coords(x, y, z)
-        return self.fields[grid_y][grid_x]
+        texture_y, texture_x = self.cube_to_texture_coords(x, y, z)
+        return self.fields[texture_y][texture_x]
 
 
 class Board:
@@ -222,18 +230,17 @@ class Board:
     def first_position(self):
         for y in range(size):
             for x in range(size):
-                field = self.texture.get_field(y=y, x=x, z=0)
+                field = self.texture.get_field(y=y, x=x, z=-1)
                 if field == Field.FLOOR:
                     return Position.initial(y=y, x=x)
 
     def move(self, position: Position, steps: int):
         for step in range(steps):
-            position.step(times=1, size=self.size)
-            field = self.texture.get_field(*position.coords)
-            if field == Field.WALL:
-                print(f'wall! {position}')
-                position.step(times=-1, size=self.size)
-                break
+            shadow = position.copy()
+            shadow.step(times=1, size=self.size)
+            field = self.texture.get_field(*shadow.coords)
+            if field != Field.WALL:
+                position.step(times=1, size=self.size)
 
 
 def read_input():
@@ -290,12 +297,12 @@ if __name__ == '__main__':
     texture = Texture(fields=fields, size=size)
     board = Board(size=size, texture=texture)
 
-    raise ValueError()
     position = board.first_position()
     position = simulate(board, position, instructions)
 
-    grid_y, grid_x = texture.cube_to_grid_coords(*position.coords)
-    grid_direction = texture.cube_to_grid_direction(position.direction)
-    print(1000 * (grid_y + 1) + 4 * (grid_x + 1) + grid_direction)
+    texture_y, texture_x = texture.cube_to_texture_coords(*position.coords)
+    texture_direction = texture.cube_to_texture_direction(position)
+    print('end', texture_y, texture_x, texture_direction)
+    print(1000 * (texture_y + 1) + 4 * (texture_x + 1) + texture_direction)
 
 
